@@ -15,7 +15,9 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.fragment.findNavController
+import androidx.core.os.bundleOf
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
+import com.google.firebase.analytics.FirebaseAnalytics
 import com.google.firebase.messaging.FirebaseMessaging
 import com.steve_md.smartmkulima.R
 import com.steve_md.smartmkulima.data.remote.DarajaApiClient
@@ -42,6 +44,8 @@ import retrofit2.HttpException
 import retrofit2.Response
 import timber.log.Timber
 import java.util.*
+import javax.inject.Inject
+import kotlin.time.Duration.Companion.milliseconds
 
 /**
  * Initiates Mpesa STK push for payment based on inputs
@@ -58,6 +62,9 @@ class PaymentFragment : BottomSheetDialogFragment(), MpesaListener, View.OnClick
     private var mPay: Button? = null
 
     private val clearCartViewModel : MainViewModel by activityViewModels()
+
+    @Inject
+    lateinit var analyticsHelper: FirebaseAnalyticsHelper
 
     private lateinit var binding: FragmentPaymentBinding
 
@@ -141,7 +148,22 @@ class PaymentFragment : BottomSheetDialogFragment(), MpesaListener, View.OnClick
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        analyticsHelper.logScreen("PaymentFragment")
+    }
+
     private fun performSTKPush(phoneNumber: String, amount: String) {
+        val paymentValue = amount.toDoubleOrNull() ?: 0.0
+        analyticsHelper.logEvent(
+            FirebaseAnalytics.Event.BEGIN_CHECKOUT,
+            bundleOf(
+                FirebaseAnalytics.Param.VALUE to paymentValue,
+                FirebaseAnalytics.Param.CURRENCY to AnalyticsParams.CURRENCY_KES,
+                FirebaseAnalytics.Param.PAYMENT_TYPE to AnalyticsParams.PAYMENT_METHOD_MPESA
+            )
+        )
+
         val timestamp = RegEx.getTimestamp()
 
         val stkPush = StkPushRequest(
@@ -169,9 +191,18 @@ class PaymentFragment : BottomSheetDialogFragment(), MpesaListener, View.OnClick
                     if (response.isSuccessful) {
                         val res = response.body()
                         if (res?.responseCode == "0") {
+                            analyticsHelper.logEvent(
+                                AnalyticsEvents.MPESA_STK_PUSH_SENT,
+                                bundleOf(
+                                    FirebaseAnalytics.Param.VALUE to paymentValue,
+                                    FirebaseAnalytics.Param.CURRENCY to AnalyticsParams.CURRENCY_KES,
+                                    FirebaseAnalytics.Param.PAYMENT_TYPE to AnalyticsParams.PAYMENT_METHOD_MPESA
+                                )
+                            )
                             toast("STK Push sent successfully.\nCustomerMessage: ${res.customerMessage}")
 
                             // This subscribes Firebase Messaging (FCM)notifications to a topic name "CheckoutRequestID"
+                            // the topic identifies uniquely every transaction using checkoutRequestId
                             FirebaseMessaging.getInstance()
                                 .subscribeToTopic(res.checkoutRequestID)
                                 .addOnCompleteListener { task ->
@@ -188,14 +219,17 @@ class PaymentFragment : BottomSheetDialogFragment(), MpesaListener, View.OnClick
                                     Log.e("PAYMENTFRAGMENT", "Failed${res.customerMessage}")
                                 }
                         } else {
+                            logStkPushFailed(paymentValue, res?.responseDescription ?: "unknown_error")
                             toast("STK Push failed.\nReason: ${res?.responseDescription}")
                         }
                     } else {
+                        logStkPushFailed(paymentValue, "http_${response.code()}")
                         Timber.e("STK Push failed: ${response.errorBody()?.string()}")
                     }
                 }
 
                 override fun onFailure(call: Call<STKPushInitialResponse>, t: Throwable) {
+                    logStkPushFailed(paymentValue, t.localizedMessage ?: "network_error")
                     //Timber.tag(TAG).e(httpException, t.printStackTrace().toString())
                     Log.e("PAYMENTFRAGMENT","==>${httpException} ${t.printStackTrace().toString()}")
                 }
@@ -337,6 +371,18 @@ class PaymentFragment : BottomSheetDialogFragment(), MpesaListener, View.OnClick
     }
 
 
+    private fun logStkPushFailed(amount: Double, reason: String) {
+        analyticsHelper.logEvent(
+            AnalyticsEvents.MPESA_STK_PUSH_FAILED,
+            bundleOf(
+                FirebaseAnalytics.Param.VALUE to amount,
+                FirebaseAnalytics.Param.CURRENCY to AnalyticsParams.CURRENCY_KES,
+                FirebaseAnalytics.Param.PAYMENT_TYPE to AnalyticsParams.PAYMENT_METHOD_MPESA,
+                AnalyticsParams.FAILURE_REASON to reason.take(100)
+            )
+        )
+    }
+
     private fun showBackPressedDialog() {
         AlertDialog.Builder(requireContext())
             .setTitle("Exit Payment")
@@ -355,6 +401,15 @@ class PaymentFragment : BottomSheetDialogFragment(), MpesaListener, View.OnClick
     }
 
     override fun sendSuccesfull(amount: String, phone: String, date: String, receipt: String) {
+        analyticsHelper.logEvent(
+            FirebaseAnalytics.Event.PURCHASE,
+            bundleOf(
+                FirebaseAnalytics.Param.TRANSACTION_ID to receipt,
+                FirebaseAnalytics.Param.VALUE to (amount.toDoubleOrNull() ?: 0.0),
+                FirebaseAnalytics.Param.CURRENCY to AnalyticsParams.CURRENCY_KES,
+                FirebaseAnalytics.Param.PAYMENT_TYPE to AnalyticsParams.PAYMENT_METHOD_MPESA
+            )
+        )
         displaySnackBar("Processing payment...")
         viewLifecycleOwner.lifecycleScope.launch {
             context?.let {
@@ -368,7 +423,7 @@ class PaymentFragment : BottomSheetDialogFragment(), MpesaListener, View.OnClick
             }
 
             displaySnackBar("Payment is Successful.")
-            delay(2000L)
+            delay(2000L.milliseconds)
             bundle.putString("AMOUNT", amount)
             bundle.putString("TRANSACTION_ID", receipt)
             bundle.putString("DATE",date)
@@ -385,6 +440,14 @@ class PaymentFragment : BottomSheetDialogFragment(), MpesaListener, View.OnClick
 
 
     override fun sendFailed(reason: String) {
+        analyticsHelper.logEvent(
+            AnalyticsEvents.MPESA_PAYMENT_FAILED,
+            bundleOf(
+                FirebaseAnalytics.Param.CURRENCY to AnalyticsParams.CURRENCY_KES,
+                FirebaseAnalytics.Param.PAYMENT_TYPE to AnalyticsParams.PAYMENT_METHOD_MPESA,
+                AnalyticsParams.FAILURE_REASON to reason.take(100)
+            )
+        )
         viewLifecycleOwner.lifecycleScope.launch {
             context?.let {
                 Toast.makeText(it, "Payment Failed\nReason: $reason", Toast.LENGTH_LONG).show()

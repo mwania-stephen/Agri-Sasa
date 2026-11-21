@@ -14,18 +14,23 @@ import com.airbnb.lottie.LottieDrawable
 import com.steve_md.smartmkulima.R
 import com.steve_md.smartmkulima.databinding.FragmentSuccessfulPaymentBinding
 import com.steve_md.smartmkulima.utils.DateFormat.getWhenStarts
+import com.steve_md.smartmkulima.utils.FirebaseAnalyticsHelper
 import com.steve_md.smartmkulima.utils.services.Config
 import com.steve_md.smartmkulima.utils.services.NumberUtil
 import com.steve_md.smartmkulima.utils.services.PrintServiceActivity
 import dagger.hilt.android.AndroidEntryPoint
 import org.json.JSONException
 import org.json.JSONObject
+import javax.inject.Inject
 
 var map: HashMap<String, String> = HashMap()
 
 
 @AndroidEntryPoint
 class SuccessfulPaymentFragment : Fragment() {
+    @Inject
+    lateinit var analyticsHelper: FirebaseAnalyticsHelper
+
     private lateinit var binding: FragmentSuccessfulPaymentBinding
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?,
@@ -48,6 +53,11 @@ class SuccessfulPaymentFragment : Fragment() {
         requireActivity().onBackPressedDispatcher.addCallback(viewLifecycleOwner) {
             showBackPressedDialog()
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        analyticsHelper.logScreen("SuccessfulPaymentFragment")
     }
 
     private fun showBackPressedDialog() {
