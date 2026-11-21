@@ -6,16 +6,24 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import androidx.cardview.widget.CardView
+import androidx.core.os.bundleOf
 import androidx.navigation.fragment.findNavController
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
+import com.google.firebase.analytics.FirebaseAnalytics
 import com.steve_md.smartmkulima.R
+import com.steve_md.smartmkulima.utils.AnalyticsParams
+import com.steve_md.smartmkulima.utils.FirebaseAnalyticsHelper
 import com.steve_md.smartmkulima.utils.displaySnackBar
 import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
 @AndroidEntryPoint
 class PayInsuranceModalBottomSheet : BottomSheetDialogFragment() {
+
+    @Inject
+    lateinit var analyticsHelper: FirebaseAnalyticsHelper
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
@@ -48,6 +56,10 @@ class PayInsuranceModalBottomSheet : BottomSheetDialogFragment() {
         val visa = view.findViewById<CardView>(R.id.visaCardView)
 
         mpesa.setOnClickListener {
+            analyticsHelper.logEvent(
+                FirebaseAnalytics.Event.ADD_PAYMENT_INFO,
+                bundleOf(FirebaseAnalytics.Param.PAYMENT_TYPE to AnalyticsParams.PAYMENT_METHOD_MPESA)
+            )
             findNavController().navigate(
                 R.id.action_payInsuranceModalBottomSheet_to_paymentFragment
             )
